@@ -3,6 +3,10 @@ import h5py
 import sys
 sys.path.insert(0, '/import/oth3/ajib0457/wang_peng_code/CIC_LSS/py')
 import idlsave
+import matplotlib.pyplot as plt
+from matplotlib import cm
+import matplotlib.colors as mcolors
+
 grid_nodes=128
 #its wise to compare the eigenpairs first, then if they don't agree, go back to hessian.
 s=idlsave.read('/import/oth3/ajib0457/wang_peng_code/CIC_LSS/LSS_SAV/CIC_star_135_1282.0_Hessian_Eigen_cell.sav')
@@ -25,10 +29,10 @@ f.close()
 eigvals_my=np.reshape(eigvals_my,(grid_nodes**3,3))
 eigvecs_my=np.reshape(eigvecs_my,(grid_nodes**3,3,3))
 
-print(sum(sum(abs(eigvals_my)-abs(eigvals_peng))))
-print(sum(sum(sum(abs(eigvecs_my)-abs(eigvecs_peng)))))
+#print(sum(sum(abs(eigvals_my)-abs(eigvals_peng))))
+#print(sum(sum(sum(abs(eigvecs_my)-abs(eigvecs_peng)))))
 
-lss=['filament']#Choose which LSS you would like to get classified
+lss=['filament','void','sheet','cluster']#Choose which LSS you would like to get classified
 def lss_classifier(lss,eigvals_unsorted,eigvecs):
     
     ####Classifier#### 
@@ -125,4 +129,91 @@ def lss_classifier(lss,eigvals_unsorted,eigvecs):
     
 eig_fnl_my,mask_fnl_my= lss_classifier(lss,eigvals_my,eigvecs_my)#Function run
 eig_fnl_peng,mask_fnl_peng= lss_classifier(lss,eigvals_peng,eigvecs_peng)#Function run
+mask_fnl_my=np.reshape(mask_fnl_my,(grid_nodes,grid_nodes,grid_nodes))
+mask_fnl_peng=np.reshape(mask_fnl_peng,(grid_nodes,grid_nodes,grid_nodes))
 
+#Density field smoothed
+f=h5py.File('/import/oth3/ajib0457/Peng_test_data_run/my_den/den_grid%s_halo_bin_wang_peng_stars'%grid_nodes, 'r')
+image=f['/stars'][:]
+f.close()
+image=np.reshape(image,(grid_nodes,grid_nodes,grid_nodes))
+s=3.92
+in_val,fnl_val=-140,140
+X,Y,Z=np.meshgrid(np.linspace(in_val,fnl_val,grid_nodes),np.linspace(in_val,fnl_val,grid_nodes),np.linspace(in_val,fnl_val,grid_nodes))
+h=(1/np.sqrt(2*np.pi*s*s))**(3)*np.exp(-1/(2*s*s)*(Y**2+X**2+Z**2))
+h=np.roll(h,int(grid_nodes/2),axis=0)
+h=np.roll(h,int(grid_nodes/2),axis=1)
+h=np.roll(h,int(grid_nodes/2),axis=2)
+fft_dxx=np.fft.fftn(h)
+fft_db=np.fft.fftn(image)
+ifft_a=np.fft.ifftn(np.multiply(fft_dxx,fft_db)).real
+
+
+slc=100
+
+plt.figure(figsize=(15,15),dpi=100)
+#The two function below are purely for the color scheme of the imshow plot: Classifier, used to create discrete imshow
+def colorbar_index(ncolors, cmap):
+    cmap = cmap_discretize(cmap, ncolors)
+    mappable = cm.ScalarMappable(cmap=cmap)
+    mappable.set_array([])
+    mappable.set_clim(-0.5, ncolors+0.5)
+    colorbar = plt.colorbar(mappable)
+    colorbar.set_ticks(np.linspace(0, ncolors, ncolors))
+    colorbar.set_ticklabels(range(ncolors))
+
+def cmap_discretize(cmap, N):   
+    if type(cmap) == str:
+        cmap = plt.get_cmap(cmap)
+    colors_i = np.concatenate((np.linspace(0, 1., N), (0.,0.,0.,0.)))
+    colors_rgba = cmap(colors_i)
+    indices = np.linspace(0, 1., N+1)
+    cdict = {}
+    for ki,key in enumerate(('red','green','blue')):
+        cdict[key] = [ (indices[i], colors_rgba[i-1,ki], colors_rgba[i,ki])
+                       for i in xrange(N+1) ]
+    # Return colormap object.
+    return mcolors.LinearSegmentedColormap(cmap.name + "_%d"%N, cdict, 1024)
+
+#Classifier: This subplot must be first so that the two functions above will help to discretise the color scheme and color bar
+#Peng data
+ax=plt.subplot2grid((2,2), (1,0))  
+plt.title('Classifier Peng')
+#plt.xlabel('z')
+#plt.ylabel('x')
+cmap = plt.get_cmap('jet')#This is where you can change the color scheme
+ax.imshow(np.rot90(mask_fnl_peng[:,slc,:],1), interpolation='nearest', cmap=cmap,extent=[0,128,0,128])#The colorbar will adapt to data
+colorbar_index(ncolors=4, cmap=cmap)
+
+#my data
+ax=plt.subplot2grid((2,2), (1,1))  
+plt.title('Classifier')
+#plt.xlabel('z')
+#plt.ylabel('x')
+cmap = plt.get_cmap('jet')#This is where you can change the color scheme
+ax.imshow(np.rot90(mask_fnl_my[:,slc,:],1), interpolation='nearest', cmap=cmap,extent=[0,128,0,128])#The colorbar will adapt to data
+colorbar_index(ncolors=4, cmap=cmap)
+
+#Density field my data
+ax5=plt.subplot2grid((2,2), (0,1))    
+plt.title('density field')
+cmapp = plt.get_cmap('jet')
+scl_plt=35#reduce scale of density fields and eigenvalue subplots by increasing number
+dn_fl_plt=ax5.imshow(np.power(np.rot90(image[:,slc,:],1),1./scl_plt),cmap=cmapp,extent=[0,128,0,128])#The colorbar will adapt to data
+plt.colorbar(dn_fl_plt,cmap=cmapp)
+
+#smoothed Density field my data
+ax5=plt.subplot2grid((2,2), (0,0))    
+plt.title('smoothed density field')
+cmapp = plt.get_cmap('jet')
+scl_plt=35#reduce scale of density fields and eigenvalue subplots by increasing number
+dn_fl_plt=ax5.imshow(np.power(np.rot90(ifft_a[:,slc,:],1),1./scl_plt),cmap=cmapp,extent=[0,128,0,128])#The colorbar will adapt to data
+plt.colorbar(dn_fl_plt,cmap=cmapp)
+
+sim_sz=75#Mpc
+#Calculate the std deviation in physical units
+grid_phys=1.*sim_sz/grid_nodes#Size of each voxel in physical units
+val_phys=1.*(2*fnl_val)/grid_nodes#Value in each grid voxel
+std_dev_phys=1.*s/val_phys*grid_phys
+
+plt.savefig('/import/oth3/ajib0457/Peng_test_data_run/plots/classification/grid%s_slc%s_smth%s.png' %(grid_nodes,slc,std_dev_phys))
